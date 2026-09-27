@@ -1,3 +1,4 @@
+import cv2
 import gc
 import logging
 from math import floor, ceil
@@ -22,9 +23,23 @@ class MangaOCRModel:
         if force_cpu:
             target_device = "cpu"
         elif device == "auto" or device is None:
-            target_device = "cuda" if torch.cuda.is_available() else "cpu"
+            # On AMD ROCm platforms, MangaOCR's VisionEncoderDecoderModel autoregressive decoding
+            # triggers a hipBLAS hardware GPU hang on APUs (gfx1103). CPU inference is fast (~300ms)
+            # and avoids crashing the desktop display. Real NVIDIA CUDA can safely use 'cuda'.
+            if torch.cuda.is_available() and getattr(torch.version, "hip", None) is None:
+                target_device = "cuda"
+            else:
+                target_device = "cpu"
         else:
             target_device = device
+
+        # Guard against ROCm GPU hangs if 'cuda' is requested on AMD
+        if target_device == "cuda" and getattr(torch.version, "hip", None) is not None:
+            logger.warning(
+                "AMD ROCm detected: MangaOCR VisionEncoderDecoderModel can cause GPU hangs on AMD APUs. "
+                "Falling back to CPU for OCR stability."
+            )
+            target_device = "cpu"
 
         logger.info(f"Initializing MangaOCR with target device: {target_device}")
         self.mocr = MangaOcr(force_cpu=(target_device == "cpu"))
@@ -46,7 +61,18 @@ class MangaOCRModel:
         if self.mocr is None:
             raise TypeError("Model is not loaded yet")
 
-        image_rgb = np.array(img)
+        if isinstance(img, Image.Image):
+            pil_img = img.convert("RGB")
+            image_rgb = np.array(pil_img)
+        elif isinstance(img, np.ndarray):
+            if img.ndim == 2:
+                image_rgb = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+            elif img.shape[2] == 4:
+                image_rgb = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
+            else:
+                image_rgb = img
+        else:
+            image_rgb = np.array(img)
         cropped_image_list = []
 
         for box in bboxes:

@@ -82,13 +82,16 @@ class ModelManager(QtCore.QObject):
             )
             self.seg_model = BubbleSegmenter(path, device=device)
 
-            # OCR
-            self.status_update.emit(f"Loading OCR on {device_desc}...")
+            # OCR (Runs on CPU on AMD ROCm to avoid APU GPU hangs; uses CUDA on NVIDIA)
+            ocr_device = (
+                "cpu"
+                if (device != "cuda" or getattr(torch.version, "hip", None) is not None)
+                else "cuda"
+            )
+            ocr_desc = "CPU" if ocr_device == "cpu" else device_desc
+            self.status_update.emit(f"Loading OCR on {ocr_desc}...")
             self.ocr_model = MangaOCRModel()
-            self.ocr_model.load_model(device=device)
-
-            # Warm-up dummy
-            self.ocr_model.predict(Image.new("RGB", (50, 50)), [[0, 0, 50, 50]])
+            self.ocr_model.load_model(device=ocr_device)
 
             # Translate
             self.status_update.emit(f"Loading translator on {device_desc}...")
