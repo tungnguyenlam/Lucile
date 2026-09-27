@@ -1,13 +1,22 @@
 # code/pipeline/Utils/BubbleSegmenter.py
 import cv2
+import logging
 import numpy as np
 import sys
+import torch
 from ultralytics import YOLO
+
+logger = logging.getLogger(__name__)
 
 
 class BubbleSegmenter:
-    def __init__(self, yolo_model_path):
+    def __init__(self, yolo_model_path, device="auto"):
         self.yolo_model = YOLO(yolo_model_path)
+        if device == "auto" or device is None:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self.device = device
+
         # Hyperparameters for splitting
         self.MIN_DEFECT_DEPTH = 13
         self.MAX_ANGLE_DEG = 170
@@ -20,8 +29,22 @@ class BubbleSegmenter:
         Main entry point: Detects raw masks and refines them via splitting.
         Returns a list of dictionaries with 'mask', 'bbox', 'contour'.
         """
-        # 1. Run YOLO
-        results = self.yolo_model.predict(source=image_path, verbose=False)
+        # 1. Run YOLO with GPU support and fallback
+        try:
+            results = self.yolo_model.predict(
+                source=image_path, device=self.device, verbose=False
+            )
+        except Exception as e:
+            if self.device != "cpu":
+                logger.warning(
+                    f"YOLO segmentation failed on {self.device}: {e}. Falling back to CPU."
+                )
+                self.device = "cpu"
+                results = self.yolo_model.predict(
+                    source=image_path, device="cpu", verbose=False
+                )
+            else:
+                raise e
         result = results[0]
 
         image_rgb = cv2.cvtColor(result.orig_img, cv2.COLOR_BGR2RGB)

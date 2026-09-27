@@ -1,6 +1,22 @@
 import os
 import sys
 
+# Auto-configure HSA override for AMD RDNA3 / Hawk Point / Phoenix APUs (gfx1103) if on Linux
+if sys.platform == "linux" and "HSA_OVERRIDE_GFX_VERSION" not in os.environ:
+    if os.path.exists("/dev/kfd"):
+        os.environ["HSA_OVERRIDE_GFX_VERSION"] = "11.0.0"
+
+import torch
+
+# Disable Flash/Mem-Efficient SDP for compatibility with AMD ROCm / RDNA3 to prevent GPU hangs
+if torch.cuda.is_available():
+    try:
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
+    except Exception:
+        pass
+
 import cv2
 import numpy as np
 from huggingface_hub import hf_hub_download
@@ -50,30 +66,37 @@ class ModelManager(QtCore.QObject):
     def load_all(self):
         """Run in a thread"""
         try:
-            # Segmentation (default: yolov8a)
-            self.status_update.emit("Loading YOLO...")
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            device_desc = (
+                f"GPU ({torch.cuda.get_device_name(0)})"
+                if device == "cuda"
+                else "CPU"
+            )
+
+            # Segmentation (default: yolov8s)
+            self.status_update.emit(f"Loading YOLO on {device_desc}...")
             model_name = "yolov8s"
             path = hf_hub_download(
                 repo_id=f"TheBlindMaster/{model_name}-manga-bubble-seg",
                 filename="best.pt",
             )
-            self.seg_model = BubbleSegmenter(path)
+            self.seg_model = BubbleSegmenter(path, device=device)
 
             # OCR
-            self.status_update.emit("Loading OCR...")
+            self.status_update.emit(f"Loading OCR on {device_desc}...")
             self.ocr_model = MangaOCRModel()
-            self.ocr_model.load_model()
+            self.ocr_model.load_model(device=device)
 
             # Warm-up dummy
             self.ocr_model.predict(Image.new("RGB", (50, 50)), [[0, 0, 50, 50]])
 
             # Translate
-            self.status_update.emit("Loading translator...")
+            self.status_update.emit(f"Loading translator on {device_desc}...")
             self.trans_model = ElanMtJaEnTranslator()
-            self.trans_model.load_model(device="auto", elan_model="base")
+            self.trans_model.load_model(device=device, elan_model="base")
 
             self.is_ready = True
-            self.status_update.emit("Ready")
+            self.status_update.emit(f"Ready ({device_desc})")
             self.models_ready.emit()
 
         except Exception as e:
@@ -82,6 +105,7 @@ class ModelManager(QtCore.QObject):
     @QtCore.Slot(str)
     def switch_segmentation_model(self, model_name):
         self.is_ready = False
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         self.status_update.emit(f"Switching segmentation to {model_name}...")
         try:
             path = hf_hub_download(
@@ -91,7 +115,7 @@ class ModelManager(QtCore.QObject):
             if self.seg_model:
                 del self.seg_model
 
-            self.seg_model = BubbleSegmenter(path)
+            self.seg_model = BubbleSegmenter(path, device=device)
             self.status_update.emit(f"Segmentation: {model_name} ready.")
         except Exception as e:
             self.status_update.emit(f"Error loading {model_name}: {e}")
@@ -101,6 +125,7 @@ class ModelManager(QtCore.QObject):
     @QtCore.Slot(str)
     def switch_translation_model(self, model_name):
         self.is_ready = False
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         self.status_update.emit(f"Switching translation to {model_name}...")
         try:
             if self.trans_model:
@@ -108,7 +133,7 @@ class ModelManager(QtCore.QObject):
                 del self.trans_model
 
             self.trans_model = ElanMtJaEnTranslator()
-            self.trans_model.load_model(elan_model=model_name)
+            self.trans_model.load_model(device=device, elan_model=model_name)
             self.status_update.emit(f"Translation: {model_name} ready")
         except Exception as e:
             self.status_update.emit(f"Error loading {model_name}: {e}")
