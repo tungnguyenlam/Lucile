@@ -78,34 +78,33 @@ class BubbleSegmenter:
             if hull_indices is None or len(hull_indices) < 3:
                 return [bubble_mask]
             defects = cv2.convexityDefects(contour, hull_indices)
-        except:
+            if defects is None:
+                return [bubble_mask]
+
+            candidates = []
+            defects = defects.reshape(-1, 4)
+            for s, e, f, d in defects:
+                depth = d / 256.0
+
+                if depth > self.MIN_DEFECT_DEPTH:
+                    far = tuple(contour[f][0])
+                    start = tuple(contour[s][0])
+                    end = tuple(contour[e][0])
+
+                    v1 = np.array(start) - np.array(far)
+                    v2 = np.array(end) - np.array(far)
+                    n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
+
+                    if n1 == 0 or n2 == 0:
+                        continue
+
+                    cosine = np.dot(v1, v2) / (n1 * n2)
+                    angle = np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0)))
+
+                    if angle < self.MAX_ANGLE_DEG:
+                        candidates.append({"point": far, "depth": depth})
+        except Exception:
             return [bubble_mask]
-
-        if defects is None:
-            return [bubble_mask]
-
-        candidates = []
-        for i in range(defects.shape[0]):
-            s, e, f, d = defects[i, 0]
-            depth = d / 256.0
-
-            if depth > self.MIN_DEFECT_DEPTH:
-                far = tuple(contour[f][0])
-                start = tuple(contour[s][0])
-                end = tuple(contour[e][0])
-
-                v1 = np.array(start) - np.array(far)
-                v2 = np.array(end) - np.array(far)
-                n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
-
-                if n1 == 0 or n2 == 0:
-                    continue
-
-                cosine = np.dot(v1, v2) / (n1 * n2)
-                angle = np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0)))
-
-                if angle < self.MAX_ANGLE_DEG:
-                    candidates.append({"point": far, "depth": depth})
 
         # Clustering
         candidates.sort(key=lambda x: x["depth"], reverse=True)

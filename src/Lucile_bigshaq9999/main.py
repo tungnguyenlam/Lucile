@@ -185,6 +185,8 @@ class BatchProcessor(QtCore.QObject):
             self.image_processed.emit(project.path)
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             print(f"Error processing {project.name}: {e}")
             project.status = "error"
             self.progress.emit(project.path, "Error")
@@ -483,8 +485,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 break
 
     def on_image_processed(self, path):
-        self.projects[path].status = "ready"
-        self.update_file_status(path, "Ready")
+        if self.projects[path].status != "error":
+            self.projects[path].status = "ready"
+            self.update_file_status(path, "Ready")
+        else:
+            self.update_file_status(path, "Error")
 
         # if currently viewing this project, refresh view
         if self.current_project and self.current_project.path == path:

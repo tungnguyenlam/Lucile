@@ -3,32 +3,38 @@ from typing import List
 import gc
 
 
+import torch
+
+
 class ElanMtJaEnTranslator:
     def __init__(self):
         self.model = None
 
     def load_model(self, device="auto", elan_model="tiny"):
+        if device == "auto" or device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
         if self.model is None:
             if elan_model == "bt":
                 self.model = pipeline(
                     "translation_ja_to_en",
                     model="Mitsua/elan-mt-bt-ja-en",
                     framework="pt",
-                    device_map=device,
+                    device=device,
                 )
             elif elan_model == "base":
                 self.model = pipeline(
                     "translation_ja_to_en",
                     model="Mitsua/elan-mt-base-ja-en",
                     framework="pt",
-                    device_map=device,
+                    device=device,
                 )
             elif elan_model == "tiny":
                 self.model = pipeline(
                     "translation_ja_to_en",
                     model="Mitsua/elan-mt-tiny-ja-en",
                     framework="pt",
-                    device_map=device,
+                    device=device,
                 )
             else:
                 raise ValueError(
